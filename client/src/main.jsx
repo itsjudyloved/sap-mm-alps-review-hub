@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Clock,
   Database,
+  FileText,
   Home,
   Plus,
   Search,
@@ -34,6 +35,10 @@ const emptyQuestion = {
   difficulty: "medium"
 };
 
+const MOCK_QUESTION_COUNT = 70;
+const MOCK_DURATION_SECONDS = 60 * 60;
+const MOCK_PASSING_SCORE = 49;
+
 function App() {
   const [page, setPage] = useState("dashboard");
   const api = useMemo(() => createApi(), []);
@@ -45,6 +50,7 @@ function App() {
       {page === "batch" && <BatchAdd api={api} />}
       {page === "review" && <Reviewer api={api} />}
       {page === "practice" && <PracticeExam api={api} />}
+      {page === "mock" && <MockExam api={api} />}
     </Shell>
   );
 }
@@ -94,7 +100,8 @@ function Shell({ page, setPage, children }) {
     { id: "questions", label: "Question Bank", icon: Database },
     { id: "batch", label: "Batch Add", icon: Upload },
     { id: "review", label: "Reviewer Mode", icon: BookOpen },
-    { id: "practice", label: "Practice Exam", icon: ClipboardList }
+    { id: "practice", label: "Practice Exam", icon: ClipboardList },
+    { id: "mock", label: "Mock Exam", icon: FileText }
   ];
 
   return (
@@ -235,6 +242,9 @@ function Dashboard({ api, setPage }) {
         </button>
         <button className="inline-action" onClick={() => setPage("practice")}>
           <ClipboardList size={18} /> Practice Exam
+        </button>
+        <button className="inline-action" onClick={() => setPage("mock")}>
+          <FileText size={18} /> Mock Exam
         </button>
       </div>
     </Page>
@@ -842,6 +852,271 @@ function PracticeExam({ api }) {
   );
 }
 
+function MockExam({ api }) {
+  const [view, setView] = useState("setup");
+  const [availableCount, setAvailableCount] = useState(null);
+  const [questions, setQuestions] = useState([]);
+  const [index, setIndex] = useState(0);
+  const [selectedByQuestion, setSelectedByQuestion] = useState({});
+  const [remainingSeconds, setRemainingSeconds] = useState(MOCK_DURATION_SECONDS);
+  const [startedAt, setStartedAt] = useState(null);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const completingRef = useRef(false);
+
+  useEffect(() => {
+    api.questions()
+      .then((data) => setAvailableCount(data.questions.length))
+      .catch(() => setAvailableCount(null));
+  }, [api]);
+
+  useEffect(() => {
+    if (view !== "exam" || result) return;
+    if (remainingSeconds <= 0) {
+      completeMock(true);
+      return;
+    }
+    const timer = setInterval(() => setRemainingSeconds((seconds) => Math.max(seconds - 1, 0)), 1000);
+    return () => clearInterval(timer);
+  }, [view, remainingSeconds, result]);
+
+  async function startMock() {
+    setError("");
+    try {
+      const data = await api.questions();
+      if (!data.questions.length) {
+        setError("No questions are available for the mock exam.");
+        return;
+      }
+
+      const selectedQuestions = shuffleArray(data.questions).slice(0, Math.min(MOCK_QUESTION_COUNT, data.questions.length));
+      setAvailableCount(data.questions.length);
+      setQuestions(selectedQuestions);
+      setIndex(0);
+      setSelectedByQuestion({});
+      setRemainingSeconds(MOCK_DURATION_SECONDS);
+      setStartedAt(Date.now());
+      setResult(null);
+      completingRef.current = false;
+      setView("exam");
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function updateSelected(questionId, value) {
+    setSelectedByQuestion({ ...selectedByQuestion, [questionId]: value });
+  }
+
+  function clearCurrent() {
+    const current = questions[index];
+    if (!current) return;
+    const next = { ...selectedByQuestion };
+    delete next[current.id];
+    setSelectedByQuestion(next);
+  }
+
+  function completeMock(timedOut = false) {
+    if (!questions.length || completingRef.current) return;
+    completingRef.current = true;
+
+    const completedAt = Date.now();
+    const durationSeconds = Math.min(
+      MOCK_DURATION_SECONDS,
+      Math.max(0, Math.round((completedAt - (startedAt || completedAt)) / 1000))
+    );
+    const answers = questions.map((question, position) => {
+      const selectedAnswer = normalizeMockAnswer(selectedByQuestion[question.id] || "", question.type);
+      const isCorrect = Boolean(selectedAnswer) && gradeMockAnswer(selectedAnswer, question.correct_answer, question.type);
+      return {
+        ...question,
+        position: position + 1,
+        selected_answer: selectedAnswer,
+        is_correct: isCorrect
+      };
+    });
+    const score = answers.filter((answer) => answer.is_correct).length;
+
+    setResult({
+      timed_out: timedOut,
+      duration_seconds: timedOut ? MOCK_DURATION_SECONDS : durationSeconds,
+      answers,
+      summary: {
+        score,
+        total_items: questions.length,
+        correct_answers: score,
+        wrong_answers: questions.length - score,
+        percentage: questions.length ? Math.round((score / questions.length) * 100) : 0,
+        passed: score >= MOCK_PASSING_SCORE
+      }
+    });
+    setView("results");
+  }
+
+  if (view === "results" && result) {
+    return <MockResults result={result} restart={() => setView("setup")} />;
+  }
+
+  if (view === "exam") {
+    const current = questions[index];
+    const selected = current ? selectedByQuestion[current.id] || "" : "";
+    const answeredCount = questions.filter((question) => String(selectedByQuestion[question.id] || "").trim()).length;
+
+    return (
+      <Page title="Mock Exam" subtitle="Answer like a real test paper. Results appear only after submission.">
+        <Toolbar>
+          <span className="status-pill">{index + 1} of {questions.length}</span>
+          <span className="status-pill">{answeredCount} answered</span>
+          <span className={`status-pill ${remainingSeconds <= 300 ? "urgent" : ""}`}>
+            <Clock size={16} /> {formatSeconds(remainingSeconds)}
+          </span>
+          <span className="status-pill">Passing: {MOCK_PASSING_SCORE}/{MOCK_QUESTION_COUNT}</span>
+        </Toolbar>
+
+        <div className="mock-layout">
+          {current && (
+            <article className="flashcard mock-card">
+              <div className="flashcard-meta">
+                <span>{current.category} - {current.difficulty}</span>
+                <TypeBadge type={current.type} />
+              </div>
+              <h2>{current.question}</h2>
+              <AnswerInput
+                question={current}
+                selected={selected}
+                locked={false}
+                onSelect={(value) => updateSelected(current.id, value)}
+              />
+              {error && <p className="error">{error}</p>}
+              <div className="review-actions">
+                <button onClick={() => setIndex(Math.max(index - 1, 0))} disabled={index === 0}>
+                  Previous
+                </button>
+                <button onClick={clearCurrent} disabled={!selected}>
+                  Clear Answer
+                </button>
+                <button onClick={() => setIndex(Math.min(index + 1, questions.length - 1))} disabled={index === questions.length - 1}>
+                  Next
+                </button>
+                <button
+                  className="primary"
+                  onClick={() => {
+                    if (confirm("Submit mock exam now? Unanswered questions will be marked wrong.")) completeMock(false);
+                  }}
+                >
+                  Submit Exam
+                </button>
+              </div>
+            </article>
+          )}
+
+          <aside className="panel-card mock-palette">
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Question Navigator</span>
+                <h2>{answeredCount}/{questions.length} answered</h2>
+              </div>
+            </div>
+            <div className="question-palette">
+              {questions.map((question, questionIndex) => (
+                <button
+                  key={question.id}
+                  className={[
+                    "palette-button",
+                    questionIndex === index ? "current" : "",
+                    selectedByQuestion[question.id] ? "answered" : ""
+                  ].join(" ")}
+                  onClick={() => setIndex(questionIndex)}
+                >
+                  {questionIndex + 1}
+                </button>
+              ))}
+            </div>
+          </aside>
+        </div>
+      </Page>
+    );
+  }
+
+  return (
+    <Page title="Mock Exam" subtitle="Simulate the final exam with 70 randomized questions and a 1-hour timer.">
+      <section className="setup-panel mock-setup">
+        <div className="metric-grid">
+          <Metric label="Questions" value={MOCK_QUESTION_COUNT} />
+          <Metric label="Timer" value="1:00" />
+          <Metric label="Passing Score" value={`${MOCK_PASSING_SCORE}/${MOCK_QUESTION_COUNT}`} />
+        </div>
+        <div className="result-banner">
+          <FileText size={20} />
+          <span>
+            {availableCount === null
+              ? "Checking question bank..."
+              : `${Math.min(MOCK_QUESTION_COUNT, availableCount)} questions will be drawn from ${availableCount} available questions.`}
+          </span>
+        </div>
+        {error && <p className="error">{error}</p>}
+        <button className="primary inline-action" onClick={startMock}>
+          <Clock size={18} /> Start 1-Hour Mock Exam
+        </button>
+      </section>
+    </Page>
+  );
+}
+
+function MockResults({ result, restart }) {
+  const { summary, answers } = result;
+  return (
+    <Page title="Mock Exam Results" subtitle="Score summary and answer review after submission.">
+      <div className="metric-grid dashboard-metrics">
+        <Metric label="Score" value={`${summary.score}/${summary.total_items}`} />
+        <Metric label="Percentage" value={`${summary.percentage}%`} />
+        <Metric label="Status" value={summary.passed ? "Passed" : "Review"} />
+        <Metric label="Time Used" value={formatSeconds(result.duration_seconds || 0)} />
+      </div>
+      <div className={`result-banner ${summary.passed ? "passed" : "not-passed"}`}>
+        <Trophy size={20} />
+        <span>
+          {summary.passed ? "Passed" : "Below target"} - {summary.correct_answers} correct, {summary.wrong_answers} wrong
+          {result.timed_out ? " - time expired" : ""}
+        </span>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Question</th>
+              <th>Your Answer</th>
+              <th>Correct Answer</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {answers.map((answer) => (
+              <tr key={answer.id}>
+                <td data-label="#">{answer.position}</td>
+                <td data-label="Question">{answer.question}</td>
+                <td data-label="Your Answer">{answer.selected_answer || "--"}</td>
+                <td data-label="Correct Answer">{answer.correct_answer}</td>
+                <td data-label="Result">
+                  {answer.is_correct ? (
+                    <span className="result-tag correct"><CheckCircle2 size={16} /> Correct</span>
+                  ) : (
+                    <span className="result-tag wrong"><XCircle size={16} /> Wrong</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button className="primary inline-action top-space" onClick={restart}>
+        Start Another Mock Exam
+      </button>
+    </Page>
+  );
+}
+
 function AnswerInput({ question, selected, locked, onSelect }) {
   if (question.type === "multiple_choice") {
     return (
@@ -967,6 +1242,32 @@ function formatSeconds(totalSeconds) {
   const minutes = Math.floor(seconds / 60);
   const remainder = String(seconds % 60).padStart(2, "0");
   return `${minutes}:${remainder}`;
+}
+
+function shuffleArray(items) {
+  const shuffled = [...items];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
+function normalizeMockAnswer(answer, type) {
+  const trimmed = String(answer || "").trim();
+  if (type === "multiple_choice") return trimmed.toUpperCase();
+  if (type === "true_false") {
+    const lowered = trimmed.toLowerCase();
+    if (lowered === "true") return "True";
+    if (lowered === "false") return "False";
+  }
+  return trimmed;
+}
+
+function gradeMockAnswer(selectedAnswer, correctAnswer, type) {
+  const expected = normalizeMockAnswer(correctAnswer, type);
+  if (type === "identification") return selectedAnswer.toLowerCase() === expected.toLowerCase();
+  return selectedAnswer === expected;
 }
 
 const sampleBatch = `Question: What is ERP?

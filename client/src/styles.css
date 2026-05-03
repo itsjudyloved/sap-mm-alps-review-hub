@@ -723,6 +723,10 @@ tr:hover td {
   padding: 18px;
 }
 
+.mock-setup {
+  max-width: 980px;
+}
+
 .status-pill {
   align-items: center;
   background: #ffffff;
@@ -818,6 +822,47 @@ tr:hover td {
   color: #5c567d;
 }
 
+.mock-layout {
+  align-items: start;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) 280px;
+}
+
+.mock-card {
+  max-width: none;
+}
+
+.mock-palette {
+  position: sticky;
+  top: 18px;
+}
+
+.question-palette {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.palette-button {
+  aspect-ratio: 1;
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+}
+
+.palette-button.current {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+.palette-button.answered:not(.current) {
+  background: #eefbf6;
+  border-color: #9fd8c5;
+  color: var(--success);
+}
+
 .result-banner {
   align-items: center;
   color: #5c567d;
@@ -825,6 +870,16 @@ tr:hover td {
   gap: 10px;
   margin-bottom: 14px;
   padding: 14px;
+}
+
+.result-banner.passed {
+  border-color: #9fd8c5;
+  color: var(--success);
+}
+
+.result-banner.not-passed {
+  border-color: #e5a8b7;
+  color: var(--danger);
 }
 
 .result-tag {
@@ -875,12 +930,17 @@ tr:hover td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .dashboard-layout {
+  .dashboard-layout,
+  .mock-layout {
     grid-template-columns: 1fr;
   }
 
   .marked-card {
     grid-row: auto;
+  }
+
+  .mock-palette {
+    position: static;
   }
 }
 
@@ -958,7 +1018,8 @@ tr:hover td {
   .form-grid,
   .choice-grid,
   .answer-options.two,
-  .exam-grid {
+  .exam-grid,
+  .question-palette {
     grid-template-columns: 1fr;
   }
 
@@ -991,6 +1052,10 @@ tr:hover td {
   .pagination-controls button {
     justify-content: center;
     width: 100%;
+  }
+
+  .question-palette {
+    grid-template-columns: repeat(10, minmax(34px, 1fr));
   }
 }
 
@@ -1101,6 +1166,10 @@ tr:hover td {
   .row-actions button {
     justify-content: center;
     width: 100%;
+  }
+
+  .question-palette {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .placeholder-row {
