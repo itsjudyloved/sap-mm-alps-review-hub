@@ -974,6 +974,7 @@ function MockExam({ api }) {
     const current = questions[index];
     const selected = current ? selectedByQuestion[current.id] || "" : "";
     const answeredCount = questions.filter((question) => String(selectedByQuestion[question.id] || "").trim()).length;
+    const allAnswered = answeredCount === questions.length;
 
     return (
       <Page title="Mock Exam" subtitle="Answer like a real test paper. Results appear only after submission.">
@@ -1011,14 +1012,16 @@ function MockExam({ api }) {
                 <button onClick={() => setIndex(Math.min(index + 1, questions.length - 1))} disabled={index === questions.length - 1}>
                   Next
                 </button>
-                <button
-                  className="primary"
-                  onClick={() => {
-                    if (confirm("Submit mock exam now? Unanswered questions will be marked wrong.")) completeMock(false);
-                  }}
-                >
-                  Submit Exam
-                </button>
+                {allAnswered && (
+                  <button
+                    className="primary"
+                    onClick={() => {
+                      if (confirm("Submit mock exam now?")) completeMock(false);
+                    }}
+                  >
+                    Submit Exam
+                  </button>
+                )}
               </div>
             </article>
           )}

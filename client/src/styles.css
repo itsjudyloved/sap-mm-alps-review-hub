@@ -687,6 +687,12 @@ tr:hover td {
   justify-content: space-between;
 }
 
+.review-actions {
+  border-top: 1px solid #eeeafa;
+  margin-top: 4px;
+  padding-top: 14px;
+}
+
 .form-grid,
 .choice-grid {
   display: grid;
