@@ -324,11 +324,11 @@ function QuestionBank({ api }) {
           <tbody>
             {visibleQuestions.map((q) => (
               <tr key={q.id}>
-                <td>{q.question}</td>
-                <td><TypeBadge type={q.type} /></td>
-                <td>{q.correct_answer}</td>
-                <td>{q.category}</td>
-                <td>{q.difficulty}</td>
+                <td data-label="Question">{q.question}</td>
+                <td data-label="Type"><TypeBadge type={q.type} /></td>
+                <td data-label="Answer">{q.correct_answer}</td>
+                <td data-label="Category">{q.category}</td>
+                <td data-label="Difficulty">{q.difficulty}</td>
                 <td className="row-actions">
                   <button onClick={() => setEditing(q)}>Edit</button>
                   <button className="danger" onClick={() => remove(q.id)}>Delete</button>
