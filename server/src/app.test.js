@@ -5,8 +5,8 @@ import { resetDbForTests } from "./db.js";
 
 const app = createApp();
 
-beforeEach(() => {
-  resetDbForTests();
+beforeEach(async () => {
+  await resetDbForTests();
 });
 
 async function createQuestion(overrides = {}) {

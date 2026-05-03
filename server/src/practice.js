@@ -1,68 +1,50 @@
 import { Router } from "express";
 import { authenticate } from "./auth.js";
-import { getDb } from "./db.js";
+import {
+  completePracticeAttempt,
+  createPracticeAttempt,
+  getPracticeAnswerWithQuestion,
+  getPracticeAttempt,
+  getPracticeAttemptReview,
+  listPracticeAttempts,
+  savePracticeAnswer,
+  selectRandomQuestions
+} from "./db.js";
 
 export const practiceRouter = Router();
 
+const asyncRoute = (handler) => (req, res, next) => {
+  Promise.resolve(handler(req, res, next)).catch(next);
+};
+
 practiceRouter.use(authenticate);
 
-practiceRouter.get("/practice/attempts", (req, res) => {
+practiceRouter.get("/practice/attempts", asyncRoute(async (req, res) => {
   const limit = clampNumber(req.query.limit, 5, 1, 20);
-  const attempts = getDb()
-    .prepare(`
-      SELECT *
-      FROM exam_attempts
-      WHERE user_id = ? AND mode = 'practice' AND completed_at IS NOT NULL
-      ORDER BY completed_at DESC, id DESC
-      LIMIT ?
-    `)
-    .all(req.user.id, limit)
-    .map(formatAttempt);
-
+  const attempts = (await listPracticeAttempts(req.user.id, limit)).map(formatAttempt);
   res.json({ attempts });
-});
+}));
 
-practiceRouter.post("/practice/start", (req, res) => {
+practiceRouter.post("/practice/start", asyncRoute(async (req, res) => {
   const count = clampNumber(req.body.count, 10, 1, 100);
   const category = normalizeCategory(req.body.category);
   const timerMinutes = normalizeTimer(req.body.timer_minutes);
 
-  const questionRows = selectRandomQuestions(count, category);
+  const questionRows = await selectRandomQuestions(count, category);
   if (questionRows.length === 0) {
     return res.status(400).json({ message: "No questions match this practice setup." });
   }
 
-  const db = getDb();
-  let attemptId;
-  try {
-    db.exec("BEGIN");
-    const result = db
-      .prepare(`
-        INSERT INTO exam_attempts (user_id, mode, score, total_items, category, timer_minutes)
-        VALUES (?, 'practice', 0, ?, ?, ?)
-      `)
-      .run(req.user.id, questionRows.length, category, timerMinutes);
-    attemptId = result.lastInsertRowid;
-
-    const insertAnswer = db.prepare(`
-      INSERT INTO exam_answers (attempt_id, question_id, position)
-      VALUES (?, ?, ?)
-    `);
-    questionRows.forEach((question, index) => insertAnswer.run(attemptId, question.id, index + 1));
-    db.exec("COMMIT");
-  } catch (err) {
-    db.exec("ROLLBACK");
-    throw err;
-  }
+  const attempt = await createPracticeAttempt(req.user.id, questionRows, category, timerMinutes);
 
   res.status(201).json({
-    attempt: formatAttempt(getAttempt(attemptId, req.user.id)),
+    attempt: formatAttempt(attempt),
     questions: questionRows.map(sanitizeQuestion)
   });
-});
+}));
 
-practiceRouter.post("/practice/:attemptId/answer", (req, res) => {
-  const attempt = requireAttempt(req.params.attemptId, req.user.id, res);
+practiceRouter.post("/practice/:attemptId/answer", asyncRoute(async (req, res) => {
+  const attempt = await requireAttempt(req.params.attemptId, req.user.id, res);
   if (!attempt) return;
   if (attempt.completed_at) return res.status(400).json({ message: "This practice attempt is already complete." });
 
@@ -72,7 +54,7 @@ practiceRouter.post("/practice/:attemptId/answer", (req, res) => {
     return res.status(400).json({ message: "Question and selected answer are required." });
   }
 
-  const row = getAnswerWithQuestion(attempt.id, questionId);
+  const row = await getPracticeAnswerWithQuestion(attempt.id, questionId);
   if (!row) return res.status(404).json({ message: "Question is not part of this attempt." });
 
   if (row.answered_at) {
@@ -80,81 +62,33 @@ practiceRouter.post("/practice/:attemptId/answer", (req, res) => {
   }
 
   const normalizedAnswer = normalizeSelectedAnswer(selectedAnswer, row.type);
-  const isCorrect = gradeAnswer(normalizedAnswer, row.correct_answer, row.type) ? 1 : 0;
+  const isCorrect = gradeAnswer(normalizedAnswer, row.correct_answer, row.type);
 
-  getDb()
-    .prepare(`
-      UPDATE exam_answers
-      SET selected_answer = ?, is_correct = ?, answered_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `)
-    .run(normalizedAnswer, isCorrect, row.answer_id);
+  await savePracticeAnswer(row.answer_id, normalizedAnswer, isCorrect);
 
-  const updated = getAnswerWithQuestion(attempt.id, questionId);
+  const updated = await getPracticeAnswerWithQuestion(attempt.id, questionId);
   res.json({ feedback: formatFeedback(updated) });
-});
+}));
 
-practiceRouter.post("/practice/:attemptId/complete", (req, res) => {
-  const attempt = requireAttempt(req.params.attemptId, req.user.id, res);
+practiceRouter.post("/practice/:attemptId/complete", asyncRoute(async (req, res) => {
+  const attempt = await requireAttempt(req.params.attemptId, req.user.id, res);
   if (!attempt) return;
 
   if (!attempt.completed_at) {
-    const timedOut = req.body.timed_out ? 1 : 0;
-    const db = getDb();
-    db.prepare(`
-      UPDATE exam_answers
-      SET is_correct = 0
-      WHERE attempt_id = ? AND is_correct IS NULL
-    `).run(attempt.id);
-
-    const score = db
-      .prepare("SELECT COUNT(*) AS score FROM exam_answers WHERE attempt_id = ? AND is_correct = 1")
-      .get(attempt.id).score;
-
-    db.prepare(`
-      UPDATE exam_attempts
-      SET score = ?,
-        timed_out = ?,
-        duration_seconds = CAST((julianday('now') - julianday(started_at)) * 86400 AS INTEGER),
-        completed_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(score, timedOut, attempt.id);
+    await completePracticeAttempt(attempt.id, req.body.timed_out);
   }
 
-  res.json(getAttemptReview(attempt.id, req.user.id));
-});
+  res.json(await getAttemptReview(attempt.id, req.user.id));
+}));
 
-practiceRouter.get("/practice/:attemptId", (req, res) => {
-  const attempt = requireAttempt(req.params.attemptId, req.user.id, res);
+practiceRouter.get("/practice/:attemptId", asyncRoute(async (req, res) => {
+  const attempt = await requireAttempt(req.params.attemptId, req.user.id, res);
   if (!attempt) return;
-  res.json(getAttemptReview(attempt.id, req.user.id));
-});
+  res.json(await getAttemptReview(attempt.id, req.user.id));
+}));
 
-function selectRandomQuestions(count, category) {
-  if (category) {
-    return getDb()
-      .prepare(`
-        SELECT id, question, type, choice_a, choice_b, choice_c, choice_d, category, difficulty
-        FROM questions
-        WHERE category = ?
-        ORDER BY RANDOM()
-        LIMIT ?
-      `)
-      .all(category, count);
-  }
-
-  return getDb()
-    .prepare(`
-      SELECT id, question, type, choice_a, choice_b, choice_c, choice_d, category, difficulty
-      FROM questions
-      ORDER BY RANDOM()
-      LIMIT ?
-    `)
-    .all(count);
-}
-
-function requireAttempt(attemptId, userId, res) {
-  const attempt = getAttempt(attemptId, userId);
+async function requireAttempt(attemptId, userId, res) {
+  const attempt = await getPracticeAttempt(attemptId, userId);
   if (!attempt) {
     res.status(404).json({ message: "Practice attempt not found." });
     return null;
@@ -162,42 +96,14 @@ function requireAttempt(attemptId, userId, res) {
   return attempt;
 }
 
-function getAttempt(id, userId) {
-  return getDb()
-    .prepare("SELECT * FROM exam_attempts WHERE id = ? AND user_id = ? AND mode = 'practice'")
-    .get(id, userId);
-}
-
-function getAnswerWithQuestion(attemptId, questionId) {
-  return getDb()
-    .prepare(`
-      SELECT ea.id AS answer_id, ea.attempt_id, ea.question_id, ea.position, ea.selected_answer,
-        ea.is_correct, ea.answered_at, q.question, q.type, q.choice_a, q.choice_b,
-        q.choice_c, q.choice_d, q.correct_answer, q.explanation, q.category, q.difficulty
-      FROM exam_answers ea
-      JOIN questions q ON q.id = ea.question_id
-      WHERE ea.attempt_id = ? AND ea.question_id = ?
-    `)
-    .get(attemptId, questionId);
-}
-
-function getAttemptReview(attemptId, userId) {
-  const attempt = formatAttempt(getAttempt(attemptId, userId));
-  const answers = getDb()
-    .prepare(`
-      SELECT ea.question_id, ea.position, ea.selected_answer, ea.is_correct, ea.answered_at,
-        q.question, q.type, q.choice_a, q.choice_b, q.choice_c, q.choice_d,
-        q.correct_answer, q.explanation, q.category, q.difficulty
-      FROM exam_answers ea
-      JOIN questions q ON q.id = ea.question_id
-      WHERE ea.attempt_id = ?
-      ORDER BY ea.position ASC
-    `)
-    .all(attemptId)
-    .map((row) => ({
-      ...row,
-      is_correct: row.is_correct === null ? null : Boolean(row.is_correct)
-    }));
+async function getAttemptReview(attemptId, userId) {
+  const review = await getPracticeAttemptReview(attemptId, userId);
+  if (!review) return null;
+  const attempt = formatAttempt(review.attempt);
+  const answers = review.answers.map((row) => ({
+    ...row,
+    is_correct: row.is_correct === null ? null : Boolean(row.is_correct)
+  }));
 
   return {
     attempt,

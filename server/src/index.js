@@ -1,8 +1,8 @@
 import { createApp } from "./app.js";
 import { config } from "./config.js";
-import { getDb } from "./db.js";
+import { initializeDb } from "./db.js";
 
-getDb();
+await initializeDb();
 
 createApp().listen(config.port, () => {
   console.log(`SAP MM ALPS Review Hub API running on http://localhost:${config.port}`);
