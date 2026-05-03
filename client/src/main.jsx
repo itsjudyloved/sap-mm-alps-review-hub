@@ -125,29 +125,94 @@ function Shell({ page, setPage, children }) {
 function Dashboard({ api, setPage }) {
   const [total, setTotal] = useState(0);
   const [latestAttempt, setLatestAttempt] = useState(null);
+  const [markedQuestions, setMarkedQuestions] = useState([]);
 
   useEffect(() => {
-    Promise.all([api.questions(), api.practiceAttempts(1)])
-      .then(([questionData, attemptData]) => {
+    Promise.all([api.questions(), api.practiceAttempts(1), api.questions({ marked: "true" })])
+      .then(([questionData, attemptData, markedData]) => {
         setTotal(questionData.questions.length);
         setLatestAttempt(attemptData.attempts[0] || null);
+        setMarkedQuestions(markedData.questions);
       })
       .catch(() => {
         setTotal(0);
         setLatestAttempt(null);
+        setMarkedQuestions([]);
       });
   }, [api]);
 
+  const latestPercentage = latestAttempt?.total_items
+    ? Math.round((latestAttempt.score / latestAttempt.total_items) * 100)
+    : 0;
+
   return (
-    <Page title="Dashboard" subtitle="Compact overview for review and practice work.">
-      <div className="metric-grid">
+    <Page title="Dashboard" subtitle="Compact academic overview for SAP MM ALPS review work.">
+      <div className="metric-grid dashboard-metrics">
         <Metric label="Total Questions" value={total} />
         <Metric
           label="Latest Score"
           value={latestAttempt ? `${latestAttempt.score}/${latestAttempt.total_items}` : "--"}
         />
-        <Metric label="Weak Topics" value="Pending" />
+        <Metric label="Passing Target" value="49/70" />
+        <Metric label="Marked For Review" value={markedQuestions.length} />
       </div>
+
+      <div className="dashboard-layout">
+        <section className="panel-card exam-card">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Final Exam</span>
+              <h2>May 7, 2026</h2>
+            </div>
+            <Clock size={20} />
+          </div>
+          <div className="exam-grid">
+            <InfoItem label="Time" value="1:30 PM" />
+            <InfoItem label="Items" value="70" />
+            <InfoItem label="Duration" value="1 hour" />
+            <InfoItem label="Passing Score" value="49" />
+          </div>
+        </section>
+
+        <section className="panel-card progress-card">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Study Progress</span>
+              <h2>Review Progress</h2>
+            </div>
+            <strong>{latestPercentage}%</strong>
+          </div>
+          <div className="progress-track" aria-label="Review Progress">
+            <span style={{ width: `${latestPercentage}%` }} />
+          </div>
+          <p className="muted">
+            {latestAttempt ? "Based on your latest completed practice attempt." : "Complete a practice attempt to update progress."}
+          </p>
+        </section>
+
+        <section className="panel-card marked-card">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Review Later</span>
+              <h2>Marked Questions</h2>
+            </div>
+            <Star size={20} fill={markedQuestions.length ? "currentColor" : "none"} />
+          </div>
+          {markedQuestions.length ? (
+            <ul className="marked-list">
+              {markedQuestions.map((question) => (
+                <li key={question.id}>
+                  <span>{question.question}</span>
+                  <small>{question.category} - {question.difficulty}</small>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="empty-inline">No marked questions yet</div>
+          )}
+        </section>
+      </div>
+
       <div className="action-row">
         <button className="primary inline-action" onClick={() => setPage("review")}>
           <BookOpen size={18} /> Start Review
@@ -160,6 +225,15 @@ function Dashboard({ api, setPage }) {
   );
 }
 
+function InfoItem({ label, value }) {
+  return (
+    <div className="info-item">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 function Metric({ label, value }) {
   return (
     <div className="metric">
@@ -167,6 +241,10 @@ function Metric({ label, value }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function TypeBadge({ type }) {
+  return <span className={`type-badge ${type}`}>{labelType(type)}</span>;
 }
 
 function QuestionBank({ api }) {
@@ -230,7 +308,7 @@ function QuestionBank({ api }) {
             {questions.map((q) => (
               <tr key={q.id}>
                 <td>{q.question}</td>
-                <td>{labelType(q.type)}</td>
+                <td><TypeBadge type={q.type} /></td>
                 <td>{q.correct_answer}</td>
                 <td>{q.category}</td>
                 <td>{q.difficulty}</td>
@@ -623,7 +701,7 @@ function PracticeExam({ api }) {
           <article className="flashcard practice-card">
             <div className="flashcard-meta">
               <span>{current.category} - {current.difficulty}</span>
-              <span>{labelType(current.type)}</span>
+              <TypeBadge type={current.type} />
             </div>
             <h2>{current.question}</h2>
             <AnswerInput
