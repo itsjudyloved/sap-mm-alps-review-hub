@@ -1,11 +1,11 @@
 {
-  "installCommand": "npm ci --prefix client",
+  "installCommand": "npm ci && npm ci --prefix server && npm ci --prefix client",
   "buildCommand": "npm run build --prefix client",
   "outputDirectory": "client/dist",
   "framework": "vite",
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!api/.*).*)",
       "destination": "/index.html"
     }
   ]
