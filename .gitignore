@@ -6,3 +6,5 @@ dist/
 *.db-wal
 coverage/
 dev.log
+
+.vercel
