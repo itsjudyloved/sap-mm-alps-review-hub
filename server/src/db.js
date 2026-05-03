@@ -60,6 +60,34 @@ function migrate(database) {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(question_id) REFERENCES questions(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS exam_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      mode TEXT NOT NULL DEFAULT 'practice',
+      score INTEGER NOT NULL DEFAULT 0,
+      total_items INTEGER NOT NULL,
+      category TEXT,
+      timer_minutes INTEGER,
+      duration_seconds INTEGER,
+      timed_out INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS exam_answers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      attempt_id INTEGER NOT NULL,
+      question_id INTEGER NOT NULL,
+      position INTEGER NOT NULL,
+      selected_answer TEXT,
+      is_correct INTEGER,
+      answered_at TEXT,
+      UNIQUE(attempt_id, question_id),
+      FOREIGN KEY(attempt_id) REFERENCES exam_attempts(id) ON DELETE CASCADE,
+      FOREIGN KEY(question_id) REFERENCES questions(id) ON DELETE CASCADE
+    );
   `);
 }
 

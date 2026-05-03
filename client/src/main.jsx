@@ -1,16 +1,20 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BookOpen,
+  CheckCircle2,
   ClipboardList,
+  Clock,
   Database,
   Home,
   LogOut,
   Plus,
   Search,
   Star,
+  Trophy,
   Upload,
-  X
+  X,
+  XCircle
 } from "lucide-react";
 import "./styles.css";
 
@@ -56,6 +60,7 @@ function App() {
       {page === "questions" && auth.user.role === "admin" && <QuestionBank api={api} />}
       {page === "batch" && auth.user.role === "admin" && <BatchAdd api={api} />}
       {page === "review" && <Reviewer api={api} />}
+      {page === "practice" && <PracticeExam api={api} />}
     </Shell>
   );
 }
@@ -85,7 +90,14 @@ function createApi(token) {
     batchPreview: (text) => request("/api/questions/batch-preview", { method: "POST", body: JSON.stringify({ text }) }),
     batchSave: (text) => request("/api/questions/batch-save", { method: "POST", body: JSON.stringify({ text }) }),
     mark: (id) => request(`/api/questions/${id}/mark`, { method: "POST" }),
-    unmark: (id) => request(`/api/questions/${id}/mark`, { method: "DELETE" })
+    unmark: (id) => request(`/api/questions/${id}/mark`, { method: "DELETE" }),
+    practiceAttempts: (limit = 5) => request(`/api/practice/attempts?limit=${limit}`),
+    startPractice: (body) => request("/api/practice/start", { method: "POST", body: JSON.stringify(body) }),
+    answerPractice: (attemptId, body) =>
+      request(`/api/practice/${attemptId}/answer`, { method: "POST", body: JSON.stringify(body) }),
+    completePractice: (attemptId, body = {}) =>
+      request(`/api/practice/${attemptId}/complete`, { method: "POST", body: JSON.stringify(body) }),
+    getPractice: (attemptId) => request(`/api/practice/${attemptId}`)
   };
 }
 
@@ -130,7 +142,7 @@ function Login({ onLogin }) {
         </label>
         {error && <p className="error">{error}</p>}
         <button className="primary">Sign In</button>
-        <p className="hint">Admin: admin/admin123 · Student: student/student123</p>
+        <p className="hint">Admin: admin/admin123 - Student: student/student123</p>
       </form>
     </main>
   );
@@ -141,7 +153,8 @@ function Shell({ auth, page, setPage, logout, children }) {
     { id: "dashboard", label: "Dashboard", icon: Home, roles: ["admin", "student"] },
     { id: "questions", label: "Question Bank", icon: Database, roles: ["admin"] },
     { id: "batch", label: "Batch Add", icon: Upload, roles: ["admin"] },
-    { id: "review", label: "Reviewer Mode", icon: BookOpen, roles: ["admin", "student"] }
+    { id: "review", label: "Reviewer Mode", icon: BookOpen, roles: ["admin", "student"] },
+    { id: "practice", label: "Practice Exam", icon: ClipboardList, roles: ["admin", "student"] }
   ].filter((link) => link.roles.includes(auth.user.role));
 
   return (
@@ -179,21 +192,38 @@ function Shell({ auth, page, setPage, logout, children }) {
 
 function Dashboard({ api, setPage }) {
   const [total, setTotal] = useState(0);
+  const [latestAttempt, setLatestAttempt] = useState(null);
 
   useEffect(() => {
-    api.questions().then((data) => setTotal(data.questions.length)).catch(() => setTotal(0));
+    Promise.all([api.questions(), api.practiceAttempts(1)])
+      .then(([questionData, attemptData]) => {
+        setTotal(questionData.questions.length);
+        setLatestAttempt(attemptData.attempts[0] || null);
+      })
+      .catch(() => {
+        setTotal(0);
+        setLatestAttempt(null);
+      });
   }, [api]);
 
   return (
-    <Page title="Dashboard" subtitle="Compact overview for Phase 1 review work.">
+    <Page title="Dashboard" subtitle="Compact overview for review and practice work.">
       <div className="metric-grid">
         <Metric label="Total Questions" value={total} />
-        <Metric label="Latest Score" value="--" />
+        <Metric
+          label="Latest Score"
+          value={latestAttempt ? `${latestAttempt.score}/${latestAttempt.total_items}` : "--"}
+        />
         <Metric label="Weak Topics" value="Pending" />
       </div>
-      <button className="primary inline-action" onClick={() => setPage("review")}>
-        <BookOpen size={18} /> Start Review
-      </button>
+      <div className="action-row">
+        <button className="primary inline-action" onClick={() => setPage("review")}>
+          <BookOpen size={18} /> Start Review
+        </button>
+        <button className="inline-action" onClick={() => setPage("practice")}>
+          <ClipboardList size={18} /> Practice Exam
+        </button>
+      </div>
     </Page>
   );
 }
@@ -481,7 +511,7 @@ function Reviewer({ api }) {
         <article className="flashcard">
           <div className="flashcard-meta">
             <span>{index + 1} of {questions.length}</span>
-            <span>{current.category} · {current.difficulty}</span>
+            <span>{current.category} - {current.difficulty}</span>
           </div>
           <h2>{current.question}</h2>
           {current.type === "multiple_choice" && (
@@ -513,6 +543,308 @@ function Reviewer({ api }) {
   );
 }
 
+function PracticeExam({ api }) {
+  const [view, setView] = useState("setup");
+  const [categories, setCategories] = useState([]);
+  const [settings, setSettings] = useState({ count: 10, category: "", timer_minutes: "" });
+  const [attempt, setAttempt] = useState(null);
+  const [questions, setQuestions] = useState([]);
+  const [index, setIndex] = useState(0);
+  const [selectedByQuestion, setSelectedByQuestion] = useState({});
+  const [feedbackByQuestion, setFeedbackByQuestion] = useState({});
+  const [remainingSeconds, setRemainingSeconds] = useState(null);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const completingRef = useRef(false);
+
+  useEffect(() => {
+    api.categories().then((data) => setCategories(data.categories)).catch(() => setCategories([]));
+  }, [api]);
+
+  useEffect(() => {
+    if (view !== "exam" || !attempt?.timer_minutes || result) return;
+    if (remainingSeconds <= 0) {
+      completeAttempt(true);
+      return;
+    }
+    const timer = setInterval(() => setRemainingSeconds((seconds) => Math.max(seconds - 1, 0)), 1000);
+    return () => clearInterval(timer);
+  }, [view, attempt?.timer_minutes, remainingSeconds, result]);
+
+  async function startPractice(e) {
+    e.preventDefault();
+    setError("");
+    try {
+      const payload = {
+        count: Number(settings.count) || 10,
+        category: settings.category,
+        timer_minutes: settings.timer_minutes ? Number(settings.timer_minutes) : null
+      };
+      const data = await api.startPractice(payload);
+      setAttempt(data.attempt);
+      setQuestions(data.questions);
+      setIndex(0);
+      setSelectedByQuestion({});
+      setFeedbackByQuestion({});
+      setRemainingSeconds(data.attempt.timer_minutes ? data.attempt.timer_minutes * 60 : null);
+      setResult(null);
+      setView("exam");
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function submitAnswer() {
+    const current = questions[index];
+    if (!current) return;
+    const selected = selectedByQuestion[current.id];
+    if (!selected || feedbackByQuestion[current.id]) return;
+
+    setError("");
+    try {
+      const data = await api.answerPractice(attempt.id, {
+        question_id: current.id,
+        selected_answer: selected
+      });
+      setFeedbackByQuestion({ ...feedbackByQuestion, [current.id]: data.feedback });
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function completeAttempt(timedOut = false) {
+    if (!attempt || completingRef.current) return;
+    completingRef.current = true;
+    setError("");
+    try {
+      const data = await api.completePractice(attempt.id, { timed_out: timedOut });
+      setResult(data);
+      setView("results");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      completingRef.current = false;
+    }
+  }
+
+  function moveNext() {
+    if (index >= questions.length - 1) {
+      completeAttempt(false);
+      return;
+    }
+    setIndex(index + 1);
+  }
+
+  function updateSelected(questionId, value) {
+    if (feedbackByQuestion[questionId]) return;
+    setSelectedByQuestion({ ...selectedByQuestion, [questionId]: value });
+  }
+
+  if (view === "results" && result) {
+    return <PracticeResults result={result} restart={() => setView("setup")} />;
+  }
+
+  if (view === "exam") {
+    const current = questions[index];
+    const feedback = current ? feedbackByQuestion[current.id] : null;
+    const selected = current ? selectedByQuestion[current.id] || "" : "";
+    const answeredCount = Object.keys(feedbackByQuestion).length;
+
+    return (
+      <Page title="Practice Exam" subtitle="Answer each item, lock it in, and review feedback instantly.">
+        <Toolbar>
+          <span className="status-pill">{index + 1} of {questions.length}</span>
+          <span className="status-pill">{answeredCount} answered</span>
+          {remainingSeconds !== null && (
+            <span className={`status-pill ${remainingSeconds <= 30 ? "urgent" : ""}`}>
+              <Clock size={16} /> {formatSeconds(remainingSeconds)}
+            </span>
+          )}
+        </Toolbar>
+
+        {current && (
+          <article className="flashcard practice-card">
+            <div className="flashcard-meta">
+              <span>{current.category} - {current.difficulty}</span>
+              <span>{labelType(current.type)}</span>
+            </div>
+            <h2>{current.question}</h2>
+            <AnswerInput
+              question={current}
+              selected={selected}
+              locked={Boolean(feedback)}
+              onSelect={(value) => updateSelected(current.id, value)}
+            />
+            {feedback && (
+              <div className={`answer-panel ${feedback.is_correct ? "correct" : "wrong"}`}>
+                <strong>
+                  {feedback.is_correct ? "Correct" : "Wrong"} - Answer: {feedback.correct_answer}
+                </strong>
+                {feedback.explanation && <p>{feedback.explanation}</p>}
+              </div>
+            )}
+            {error && <p className="error">{error}</p>}
+            <div className="review-actions">
+              <button onClick={() => setIndex(Math.max(index - 1, 0))}>Previous</button>
+              {!feedback ? (
+                <button className="primary" onClick={submitAnswer} disabled={!selected}>
+                  Submit Answer
+                </button>
+              ) : (
+                <button className="primary" onClick={moveNext}>
+                  {index >= questions.length - 1 ? "Finish" : "Next"}
+                </button>
+              )}
+              <button onClick={() => completeAttempt(false)}>Finish Now</button>
+            </div>
+          </article>
+        )}
+      </Page>
+    );
+  }
+
+  return (
+    <Page title="Practice Exam" subtitle="Choose a randomized set and optional timer.">
+      <form className="setup-panel" onSubmit={startPractice}>
+        <div className="form-grid">
+          <label>
+            Number of Questions
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={settings.count}
+              onChange={(e) => setSettings({ ...settings, count: e.target.value })}
+            />
+          </label>
+          <label>
+            Category
+            <select value={settings.category} onChange={(e) => setSettings({ ...settings, category: e.target.value })}>
+              <option value="">All categories</option>
+              {categories.map((category) => (
+                <option key={category}>{category}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Timer Minutes
+            <input
+              type="number"
+              min="1"
+              max="180"
+              placeholder="Off"
+              value={settings.timer_minutes}
+              onChange={(e) => setSettings({ ...settings, timer_minutes: e.target.value })}
+            />
+          </label>
+        </div>
+        {error && <p className="error">{error}</p>}
+        <button className="primary inline-action">
+          <ClipboardList size={18} /> Start Practice
+        </button>
+      </form>
+    </Page>
+  );
+}
+
+function AnswerInput({ question, selected, locked, onSelect }) {
+  if (question.type === "multiple_choice") {
+    return (
+      <div className="answer-options">
+        {["a", "b", "c", "d"].map((letter) => {
+          const value = letter.toUpperCase();
+          return (
+            <button
+              key={letter}
+              className={selected === value ? "selected" : ""}
+              disabled={locked}
+              onClick={() => onSelect(value)}
+              type="button"
+            >
+              <strong>{value}.</strong> {question[`choice_${letter}`]}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (question.type === "true_false") {
+    return (
+      <div className="answer-options two">
+        {["True", "False"].map((value) => (
+          <button
+            key={value}
+            className={selected === value ? "selected" : ""}
+            disabled={locked}
+            onClick={() => onSelect(value)}
+            type="button"
+          >
+            {value}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <label>
+      Answer
+      <input value={selected} disabled={locked} onChange={(e) => onSelect(e.target.value)} />
+    </label>
+  );
+}
+
+function PracticeResults({ result, restart }) {
+  const { summary, attempt, answers } = result;
+  return (
+    <Page title="Practice Results" subtitle="Score summary and answer review.">
+      <div className="metric-grid">
+        <Metric label="Score" value={`${summary.score}/${summary.total_items}`} />
+        <Metric label="Percentage" value={`${summary.percentage}%`} />
+        <Metric label="Elapsed" value={formatSeconds(attempt.duration_seconds || 0)} />
+      </div>
+      <div className="result-banner">
+        <Trophy size={20} />
+        <span>{summary.correct_answers} correct, {summary.wrong_answers} wrong{attempt.timed_out ? " - timed out" : ""}</span>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Question</th>
+              <th>Your Answer</th>
+              <th>Correct Answer</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {answers.map((answer) => (
+              <tr key={answer.question_id}>
+                <td>{answer.position}</td>
+                <td>{answer.question}</td>
+                <td>{answer.selected_answer || "--"}</td>
+                <td>{answer.correct_answer}</td>
+                <td>
+                  {answer.is_correct ? (
+                    <span className="result-tag correct"><CheckCircle2 size={16} /> Correct</span>
+                  ) : (
+                    <span className="result-tag wrong"><XCircle size={16} /> Wrong</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button className="primary inline-action top-space" onClick={restart}>
+        Start Another Practice
+      </button>
+    </Page>
+  );
+}
+
 function Page({ title, subtitle, children }) {
   return (
     <>
@@ -533,6 +865,13 @@ function Toolbar({ children }) {
 
 function labelType(type) {
   return type.replace("_", " ");
+}
+
+function formatSeconds(totalSeconds) {
+  const seconds = Math.max(Number(totalSeconds) || 0, 0);
+  const minutes = Math.floor(seconds / 60);
+  const remainder = String(seconds % 60).padStart(2, "0");
+  return `${minutes}:${remainder}`;
 }
 
 const sampleBatch = `Question: What is ERP?

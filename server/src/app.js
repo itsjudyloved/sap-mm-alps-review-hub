@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { login } from "./auth.js";
 import { questionsRouter } from "./questions.js";
+import { practiceRouter } from "./practice.js";
 
 export function createApp() {
   const app = express();
@@ -21,6 +22,7 @@ export function createApp() {
   });
 
   app.use("/api", questionsRouter);
+  app.use("/api", practiceRouter);
 
   app.use((err, req, res, next) => {
     console.error(err);
