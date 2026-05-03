@@ -856,18 +856,37 @@ function seedStaticQuestionsSqlite(database) {
     .prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")
     .get();
   const adminId = admin?.id || null;
-  const exists = database.prepare("SELECT id FROM questions WHERE question = ? LIMIT 1");
+  const countExisting = database.prepare(`
+    SELECT COUNT(*) AS count
+    FROM questions
+    WHERE question = ?
+      AND type = ?
+      AND COALESCE(choice_a, '') = ?
+      AND COALESCE(choice_b, '') = ?
+      AND COALESCE(choice_c, '') = ?
+      AND COALESCE(choice_d, '') = ?
+      AND correct_answer = ?
+      AND COALESCE(explanation, '') = ?
+      AND category = ?
+      AND difficulty = ?
+  `);
   const insert = database.prepare(`
     INSERT INTO questions (
       question, type, choice_a, choice_b, choice_c, choice_d, correct_answer,
       explanation, category, difficulty, created_by
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
+  const desiredCounts = new Map();
 
   try {
     database.exec("BEGIN");
     for (const question of questions) {
-      if (exists.get(question.question)) continue;
+      const signature = getQuestionSignature(question);
+      const desiredCount = (desiredCounts.get(signature) || 0) + 1;
+      desiredCounts.set(signature, desiredCount);
+      const existingCount = countExisting.get(...getQuestionSignatureValues(question)).count;
+      if (existingCount >= desiredCount) continue;
+
       insert.run(
         question.question,
         question.type,
@@ -896,12 +915,33 @@ async function seedStaticQuestionsPostgres(pool) {
   const { rows } = await pool.query("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1");
   const adminId = rows[0]?.id || null;
   const client = await pool.connect();
+  const desiredCounts = new Map();
 
   try {
     await client.query("BEGIN");
     for (const question of questions) {
-      const existing = await client.query("SELECT id FROM questions WHERE question = $1 LIMIT 1", [question.question]);
-      if (existing.rows.length) continue;
+      const signature = getQuestionSignature(question);
+      const desiredCount = (desiredCounts.get(signature) || 0) + 1;
+      desiredCounts.set(signature, desiredCount);
+      const existing = await client.query(
+        `
+          SELECT COUNT(*)::int AS count
+          FROM questions
+          WHERE question = $1
+            AND type = $2
+            AND COALESCE(choice_a, '') = $3
+            AND COALESCE(choice_b, '') = $4
+            AND COALESCE(choice_c, '') = $5
+            AND COALESCE(choice_d, '') = $6
+            AND correct_answer = $7
+            AND COALESCE(explanation, '') = $8
+            AND category = $9
+            AND difficulty = $10
+        `,
+        getQuestionSignatureValues(question)
+      );
+      if (existing.rows[0].count >= desiredCount) continue;
+
       await insertQuestionPostgres(client, question, adminId);
     }
     await client.query("COMMIT");
@@ -911,4 +951,23 @@ async function seedStaticQuestionsPostgres(pool) {
   } finally {
     client.release();
   }
+}
+
+function getQuestionSignature(question) {
+  return JSON.stringify(getQuestionSignatureValues(question));
+}
+
+function getQuestionSignatureValues(question) {
+  return [
+    question.question,
+    question.type,
+    question.choice_a || "",
+    question.choice_b || "",
+    question.choice_c || "",
+    question.choice_d || "",
+    question.correct_answer,
+    question.explanation || "",
+    question.category,
+    question.difficulty
+  ];
 }
