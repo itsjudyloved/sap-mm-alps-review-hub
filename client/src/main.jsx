@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import {
   BookOpen,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   Clock,
   Database,
@@ -253,6 +255,8 @@ function QuestionBank({ api }) {
   const [categories, setCategories] = useState([]);
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
 
   async function load() {
     const [questionData, categoryData] = await Promise.all([api.questions(filters), api.categories()]);
@@ -263,6 +267,19 @@ function QuestionBank({ api }) {
   useEffect(() => {
     load().catch((err) => setError(err.message));
   }, [filters.search, filters.category]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters.search, filters.category]);
+
+  const totalPages = Math.max(1, Math.ceil(questions.length / pageSize));
+  const pageStart = (currentPage - 1) * pageSize;
+  const visibleQuestions = questions.slice(pageStart, pageStart + pageSize);
+  const emptyRows = Math.max(0, pageSize - visibleQuestions.length);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
 
   async function remove(id) {
     if (!confirm("Delete this question?")) return;
@@ -305,7 +322,7 @@ function QuestionBank({ api }) {
             </tr>
           </thead>
           <tbody>
-            {questions.map((q) => (
+            {visibleQuestions.map((q) => (
               <tr key={q.id}>
                 <td>{q.question}</td>
                 <td><TypeBadge type={q.type} /></td>
@@ -318,8 +335,37 @@ function QuestionBank({ api }) {
                 </td>
               </tr>
             ))}
+            {!visibleQuestions.length && (
+              <tr className="placeholder-row">
+                <td colSpan="6">No questions found.</td>
+              </tr>
+            )}
+            {Array.from({ length: visibleQuestions.length ? emptyRows : emptyRows - 1 }).map((_, index) => (
+              <tr className="placeholder-row" key={`empty-${index}`} aria-hidden="true">
+                <td colSpan="6">&nbsp;</td>
+              </tr>
+            ))}
           </tbody>
         </table>
+      </div>
+      <div className="table-footer">
+        <span>
+          {questions.length
+            ? `Showing ${pageStart + 1}-${Math.min(pageStart + pageSize, questions.length)} of ${questions.length}`
+            : "0 questions"}
+        </span>
+        <div className="pagination-controls">
+          <button onClick={() => setCurrentPage(Math.max(currentPage - 1, 1))} disabled={currentPage === 1}>
+            <ChevronLeft size={16} /> Previous
+          </button>
+          <span>Page {currentPage} of {totalPages}</span>
+          <button
+            onClick={() => setCurrentPage(Math.min(currentPage + 1, totalPages))}
+            disabled={currentPage === totalPages}
+          >
+            Next <ChevronRight size={16} />
+          </button>
+        </div>
       </div>
       {editing && <QuestionModal api={api} question={editing} close={() => setEditing(null)} saved={load} />}
     </Page>

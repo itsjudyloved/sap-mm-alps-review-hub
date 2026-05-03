@@ -517,10 +517,41 @@ tr:hover td {
   background: #fcfbff;
 }
 
+.placeholder-row td {
+  color: var(--muted);
+  height: 64px;
+}
+
+.placeholder-row:hover td {
+  background: var(--card);
+}
+
 .row-actions {
   display: flex;
   gap: 8px;
   white-space: nowrap;
+}
+
+.table-footer {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 13px;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.pagination-controls {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.pagination-controls span {
+  color: #5c567d;
+  font-weight: 600;
+  min-width: 88px;
+  text-align: center;
 }
 
 .type-badge {
@@ -814,8 +845,20 @@ tr:hover td {
 
   .toolbar > *,
   .search-box,
+  .table-footer,
   .review-actions button,
   .modal-actions button {
+    width: 100%;
+  }
+
+  .table-footer,
+  .pagination-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pagination-controls button {
+    justify-content: center;
     width: 100%;
   }
 }
