@@ -1,14 +1,17 @@
 import { DatabaseSync } from "node:sqlite";
+import { readFileSync } from "node:fs";
 import bcrypt from "bcryptjs";
 import pg from "pg";
 import { config } from "./config.js";
 
 const { Pool } = pg;
+const staticQuestionsUrl = new URL("./staticQuestions.json", import.meta.url);
 
 let sqliteDb;
 let pgPool;
 let initPromise;
 let forceSqliteMemory = false;
+let staticQuestions;
 
 function shouldUsePostgres() {
   return Boolean(config.databaseUrl) && process.env.NODE_ENV !== "test" && !forceSqliteMemory;
@@ -553,6 +556,7 @@ async function initializePostgres() {
   });
   await migratePostgres(pgPool);
   await seedUsersPostgres(pgPool);
+  await seedStaticQuestionsPostgres(pgPool);
 }
 
 async function initializeSqlite() {
@@ -560,6 +564,7 @@ async function initializeSqlite() {
   sqliteDb.exec("PRAGMA foreign_keys = ON");
   migrateSqlite(sqliteDb);
   seedUsersSqlite(sqliteDb);
+  seedStaticQuestionsSqlite(sqliteDb);
 }
 
 function listQuestionsSqlite(filters, userId) {
@@ -834,4 +839,76 @@ async function seedUsersPostgres(pool) {
     bcrypt.hashSync("student123", 10),
     "student"
   ]);
+}
+
+function getStaticQuestions() {
+  if (!staticQuestions) {
+    staticQuestions = JSON.parse(readFileSync(staticQuestionsUrl, "utf8"));
+  }
+  return staticQuestions;
+}
+
+function seedStaticQuestionsSqlite(database) {
+  const questions = getStaticQuestions();
+  if (!questions.length) return;
+
+  const admin = database
+    .prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")
+    .get();
+  const adminId = admin?.id || null;
+  const exists = database.prepare("SELECT id FROM questions WHERE question = ? LIMIT 1");
+  const insert = database.prepare(`
+    INSERT INTO questions (
+      question, type, choice_a, choice_b, choice_c, choice_d, correct_answer,
+      explanation, category, difficulty, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  try {
+    database.exec("BEGIN");
+    for (const question of questions) {
+      if (exists.get(question.question)) continue;
+      insert.run(
+        question.question,
+        question.type,
+        question.choice_a,
+        question.choice_b,
+        question.choice_c,
+        question.choice_d,
+        question.correct_answer,
+        question.explanation,
+        question.category,
+        question.difficulty,
+        adminId
+      );
+    }
+    database.exec("COMMIT");
+  } catch (err) {
+    database.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+async function seedStaticQuestionsPostgres(pool) {
+  const questions = getStaticQuestions();
+  if (!questions.length) return;
+
+  const { rows } = await pool.query("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1");
+  const adminId = rows[0]?.id || null;
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    for (const question of questions) {
+      const existing = await client.query("SELECT id FROM questions WHERE question = $1 LIMIT 1", [question.question]);
+      if (existing.rows.length) continue;
+      await insertQuestionPostgres(client, question, adminId);
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
