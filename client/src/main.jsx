@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import {
   BookOpen,
   CheckCircle2,
+  ChevronsLeft,
+  ChevronsRight,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -86,6 +88,7 @@ function clean(obj) {
 }
 
 function Shell({ page, setPage, children }) {
+  const [collapsed, setCollapsed] = useState(false);
   const links = [
     { id: "dashboard", label: "Dashboard", icon: Home },
     { id: "questions", label: "Question Bank", icon: Database },
@@ -95,11 +98,22 @@ function Shell({ page, setPage, children }) {
   ];
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
-        <div className="brand-block">
-          <span>ALPS</span>
-          <strong>Review Hub</strong>
+        <div className="sidebar-head">
+          <div className="brand-block">
+            <span>ALPS</span>
+            <strong>Review Hub</strong>
+          </div>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={() => setCollapsed(!collapsed)}
+          >
+            {collapsed ? <ChevronsRight size={17} /> : <ChevronsLeft size={17} />}
+          </button>
         </div>
         <nav>
           {links.map((link) => {
@@ -107,7 +121,7 @@ function Shell({ page, setPage, children }) {
             return (
               <button key={link.id} className={page === link.id ? "active" : ""} onClick={() => setPage(link.id)}>
                 <Icon size={18} />
-                {link.label}
+                <span className="nav-label">{link.label}</span>
               </button>
             );
           })}
