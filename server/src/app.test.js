@@ -202,6 +202,26 @@ Answer: Maybe`;
     expect(res.body.rows[1].valid).toBe(false);
   });
 
+  it("parses pasted questions without explicit type or blank separators", async () => {
+    const text = `Question: What is ERP?
+A. Inventory system
+B. Integrated business system
+C. Accounting tool
+D. Warehouse system
+Correct Answer: B
+Category: SAP Basics
+Question: What does PO mean?
+Answer: Purchase Order
+Category: Procurement`;
+
+    const res = await request(app).post("/api/questions/batch-preview").send({ text });
+
+    expect(res.status).toBe(200);
+    expect(res.body.validCount).toBe(2);
+    expect(res.body.rows[0].question.type).toBe("multiple_choice");
+    expect(res.body.rows[1].question.type).toBe("identification");
+  });
+
   it("persists marks for the default admin user", async () => {
     const created = await request(app)
       .post("/api/questions")

@@ -338,28 +338,53 @@ function BatchAdd({ api }) {
   const [text, setText] = useState(sampleBatch);
   const [preview, setPreview] = useState(null);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
   async function previewBatch() {
     setMessage("");
-    setPreview(await api.batchPreview(text));
+    setError("");
+    try {
+      setPreview(await api.batchPreview(text));
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   async function saveBatch() {
-    const result = await api.batchSave(text);
-    setMessage(`Saved ${result.savedCount} valid question(s).`);
-    setPreview(await api.batchPreview(text));
+    setMessage("");
+    setError("");
+    try {
+      const result = await api.batchSave(text);
+      setMessage(
+        result.savedCount
+          ? `Saved ${result.savedCount} valid question(s).`
+          : "No valid questions found to save."
+      );
+      setPreview(await api.batchPreview(text));
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   return (
     <Page title="Batch Add" subtitle="Paste formatted questions, preview validation, and save valid rows only.">
       <div className="split">
-        <textarea className="batch-input" value={text} onChange={(e) => setText(e.target.value)} />
+        <textarea
+          className="batch-input"
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setMessage("");
+            setError("");
+          }}
+        />
         <div className="batch-actions">
-          <button onClick={previewBatch}>Preview</button>
-          <button className="primary" onClick={saveBatch} disabled={!preview?.validCount}>
+          <button onClick={previewBatch} disabled={!text.trim()}>Preview</button>
+          <button className="primary" onClick={saveBatch} disabled={!text.trim()}>
             Save Valid
           </button>
           {message && <p className="success">{message}</p>}
+          {error && <p className="error">{error}</p>}
         </div>
       </div>
       {preview && (
@@ -807,7 +832,6 @@ function formatSeconds(totalSeconds) {
 }
 
 const sampleBatch = `Question: What is ERP?
-Type: multiple_choice
 A. Inventory system
 B. Integrated business system
 C. Accounting tool
@@ -815,6 +839,11 @@ D. Warehouse system
 Answer: B
 Category: SAP Basics
 Difficulty: easy
-Explanation: ERP integrates business processes.`;
+Explanation: ERP integrates business processes.
+
+Question: What does PO mean?
+Answer: Purchase Order
+Category: Procurement
+Difficulty: easy`;
 
 createRoot(document.getElementById("root")).render(<App />);
