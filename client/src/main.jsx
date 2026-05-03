@@ -7,7 +7,6 @@ import {
   Clock,
   Database,
   Home,
-  LogOut,
   Plus,
   Search,
   Star,
@@ -32,46 +31,26 @@ const emptyQuestion = {
 };
 
 function App() {
-  const [auth, setAuth] = useState(() => {
-    const saved = localStorage.getItem("reviewHubAuth");
-    return saved ? JSON.parse(saved) : null;
-  });
   const [page, setPage] = useState("dashboard");
-
-  const api = useMemo(() => createApi(auth?.token), [auth?.token]);
-
-  function handleLogin(nextAuth) {
-    localStorage.setItem("reviewHubAuth", JSON.stringify(nextAuth));
-    setAuth(nextAuth);
-    setPage("dashboard");
-  }
-
-  function logout() {
-    localStorage.removeItem("reviewHubAuth");
-    setAuth(null);
-    setPage("dashboard");
-  }
-
-  if (!auth) return <Login onLogin={handleLogin} />;
+  const api = useMemo(() => createApi(), []);
 
   return (
-    <Shell auth={auth} page={page} setPage={setPage} logout={logout}>
+    <Shell page={page} setPage={setPage}>
       {page === "dashboard" && <Dashboard api={api} setPage={setPage} />}
-      {page === "questions" && auth.user.role === "admin" && <QuestionBank api={api} />}
-      {page === "batch" && auth.user.role === "admin" && <BatchAdd api={api} />}
+      {page === "questions" && <QuestionBank api={api} />}
+      {page === "batch" && <BatchAdd api={api} />}
       {page === "review" && <Reviewer api={api} />}
       {page === "practice" && <PracticeExam api={api} />}
     </Shell>
   );
 }
 
-function createApi(token) {
+function createApi() {
   async function request(path, options = {}) {
     const res = await fetch(path, {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...options.headers
       }
     });
@@ -81,7 +60,6 @@ function createApi(token) {
   }
 
   return {
-    login: (body) => request("/api/auth/login", { method: "POST", body: JSON.stringify(body) }),
     questions: (params = {}) => request(`/api/questions?${new URLSearchParams(clean(params))}`),
     categories: () => request("/api/categories"),
     createQuestion: (body) => request("/api/questions", { method: "POST", body: JSON.stringify(body) }),
@@ -105,57 +83,14 @@ function clean(obj) {
   return Object.fromEntries(Object.entries(obj).filter(([, value]) => value));
 }
 
-function Login({ onLogin }) {
-  const api = useMemo(() => createApi(), []);
-  const [form, setForm] = useState({ username: "admin", password: "admin123" });
-  const [error, setError] = useState("");
-
-  async function submit(e) {
-    e.preventDefault();
-    setError("");
-    try {
-      onLogin(await api.login(form));
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
-  return (
-    <main className="login-page">
-      <form className="login-panel" onSubmit={submit}>
-        <div>
-          <p className="eyebrow">SAP MM ALPS</p>
-          <h1>Review Hub</h1>
-          <p className="muted">Sign in to manage questions or review flashcards.</p>
-        </div>
-        <label>
-          Username
-          <input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
-        </label>
-        <label>
-          Password
-          <input
-            type="password"
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-          />
-        </label>
-        {error && <p className="error">{error}</p>}
-        <button className="primary">Sign In</button>
-        <p className="hint">Admin: admin/admin123 - Student: student/student123</p>
-      </form>
-    </main>
-  );
-}
-
-function Shell({ auth, page, setPage, logout, children }) {
+function Shell({ page, setPage, children }) {
   const links = [
-    { id: "dashboard", label: "Dashboard", icon: Home, roles: ["admin", "student"] },
-    { id: "questions", label: "Question Bank", icon: Database, roles: ["admin"] },
-    { id: "batch", label: "Batch Add", icon: Upload, roles: ["admin"] },
-    { id: "review", label: "Reviewer Mode", icon: BookOpen, roles: ["admin", "student"] },
-    { id: "practice", label: "Practice Exam", icon: ClipboardList, roles: ["admin", "student"] }
-  ].filter((link) => link.roles.includes(auth.user.role));
+    { id: "dashboard", label: "Dashboard", icon: Home },
+    { id: "questions", label: "Question Bank", icon: Database },
+    { id: "batch", label: "Batch Add", icon: Upload },
+    { id: "review", label: "Reviewer Mode", icon: BookOpen },
+    { id: "practice", label: "Practice Exam", icon: ClipboardList }
+  ];
 
   return (
     <div className="app-shell">
@@ -177,12 +112,9 @@ function Shell({ auth, page, setPage, logout, children }) {
         </nav>
         <div className="user-block">
           <div>
-            <strong>{auth.user.username}</strong>
-            <span>{auth.user.role}</span>
+            <strong>Admin</strong>
+            <span>Open mode</span>
           </div>
-          <button className="icon-button" onClick={logout} title="Log out">
-            <LogOut size={18} />
-          </button>
         </div>
       </aside>
       <section className="content">{children}</section>
