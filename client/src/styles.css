@@ -698,22 +698,65 @@ tr:hover td {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.split {
+.batch-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-soft);
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr) 180px;
   margin-bottom: 14px;
+  max-width: 980px;
+  padding: 14px;
+}
+
+.batch-panel-head,
+.batch-hint {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.batch-panel-head span {
+  color: #5c567d;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.batch-panel-head small,
+.batch-hint {
+  font-size: 12px;
+}
+
+.batch-hint strong {
+  color: var(--primary);
+  white-space: nowrap;
 }
 
 .batch-input {
+  background: #fbfaff;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   min-height: 300px;
 }
 
 .batch-actions {
-  align-content: start;
   display: grid;
-  gap: 10px;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 14px;
+  max-width: 980px;
+}
+
+.batch-actions button {
+  justify-content: center;
+  min-height: 42px;
+}
+
+.batch-message {
+  margin-bottom: 14px;
 }
 
 .setup-panel {
@@ -1014,7 +1057,7 @@ tr:hover td {
 
   .metric-grid,
   .dashboard-metrics,
-  .split,
+  .batch-actions,
   .form-grid,
   .choice-grid,
   .answer-options.two,
@@ -1187,5 +1230,19 @@ tr:hover td {
 
   .marked-list {
     max-height: none;
+  }
+
+  .batch-panel {
+    padding: 12px;
+  }
+
+  .batch-panel-head,
+  .batch-hint {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .batch-hint strong {
+    white-space: normal;
   }
 }

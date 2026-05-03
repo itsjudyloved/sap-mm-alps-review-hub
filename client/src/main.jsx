@@ -516,7 +516,11 @@ function BatchAdd({ api }) {
 
   return (
     <Page title="Batch Add" subtitle="Paste formatted questions, preview validation, and save valid rows only.">
-      <div className="split">
+      <section className="batch-panel">
+        <div className="batch-panel-head">
+          <span>Raw Input</span>
+          <small>{preview ? `${preview.validCount} valid question(s)` : "Paste questions below"}</small>
+        </div>
         <textarea
           className="batch-input"
           value={text}
@@ -526,15 +530,24 @@ function BatchAdd({ api }) {
             setError("");
           }}
         />
-        <div className="batch-actions">
-          <button onClick={previewBatch} disabled={!text.trim()}>Preview</button>
-          <button className="primary" onClick={saveBatch} disabled={!text.trim()}>
-            Save Valid
-          </button>
+        <div className="batch-hint">
+          <span>Use a blank line between questions. Valid rows can be saved even if some rows have errors.</span>
+          <strong>{preview ? `${preview.rows.length} row(s) detected` : "Preview to validate"}</strong>
+        </div>
+      </section>
+
+      <div className="batch-actions">
+        <button onClick={previewBatch} disabled={!text.trim()}>Preview</button>
+        <button className="primary" onClick={saveBatch} disabled={!text.trim()}>
+          Save Valid
+        </button>
+      </div>
+      {(message || error) && (
+        <div className="batch-message">
           {message && <p className="success">{message}</p>}
           {error && <p className="error">{error}</p>}
         </div>
-      </div>
+      )}
       {preview && (
         <div className="table-wrap">
           <table>
