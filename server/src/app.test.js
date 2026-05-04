@@ -60,6 +60,23 @@ describe("practice exams", () => {
     expect(res.body.questions[0]).not.toHaveProperty("explanation");
   });
 
+  it("supports the Newly Added category in practice setup", async () => {
+    await createQuestion({ question: "What is the purpose of ME21N?", category: "Transaction Codes" });
+
+    const categories = await request(app).get("/api/categories");
+    expect(categories.status).toBe(200);
+    expect(categories.body.categories).toContain("Newly Added");
+
+    const res = await request(app)
+      .post("/api/practice/start")
+      .send({ count: 5, category: "Newly Added" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.attempt.category).toBe("Newly Added");
+    expect(res.body.questions).toHaveLength(1);
+    expect(res.body.questions[0].question).toBe("What is the purpose of ME21N?");
+  });
+
   it("fails cleanly when no questions match the setup", async () => {
     const res = await request(app).post("/api/practice/start").send({ count: 10, category: "SAP Basics" });
 

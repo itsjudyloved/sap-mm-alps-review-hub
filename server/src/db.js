@@ -3,6 +3,11 @@ import { readFileSync } from "node:fs";
 import bcrypt from "bcryptjs";
 import pg from "pg";
 import { config } from "./config.js";
+import {
+  appendSpecialCategories,
+  getSpecialCategoryQuestions,
+  normalizeQuestionText
+} from "./questionGroups.js";
 
 const { Pool } = pg;
 const staticQuestionsUrl = new URL("./staticQuestions.json", import.meta.url);
@@ -71,15 +76,18 @@ export async function getDefaultAdminUser() {
 
 export async function listCategories() {
   await initializeDb();
+  let categories;
   if (shouldUsePostgres()) {
     const { rows } = await pgPool.query("SELECT DISTINCT category FROM questions ORDER BY category");
-    return rows.map((row) => row.category);
+    categories = rows.map((row) => row.category);
+  } else {
+    categories = sqliteDb
+      .prepare("SELECT DISTINCT category FROM questions ORDER BY category")
+      .all()
+      .map((row) => row.category);
   }
 
-  return sqliteDb
-    .prepare("SELECT DISTINCT category FROM questions ORDER BY category")
-    .all()
-    .map((row) => row.category);
+  return appendSpecialCategories(categories);
 }
 
 export async function listQuestions(filters = {}, userId) {
@@ -329,10 +337,20 @@ export async function listPracticeAttempts(userId, limit) {
 
 export async function selectRandomQuestions(count, category) {
   await initializeDb();
+  const specialQuestions = getSpecialCategoryQuestions(category);
   if (shouldUsePostgres()) {
-    const values = category ? [category, count] : [count];
-    const where = category ? "WHERE category = $1" : "";
-    const limit = category ? "$2" : "$1";
+    let values = [count];
+    let where = "";
+    let limit = "$1";
+    if (specialQuestions.length) {
+      values = [specialQuestions.map(normalizeQuestionText), count];
+      where = "WHERE LOWER(TRIM(question)) = ANY($1)";
+      limit = "$2";
+    } else if (category) {
+      values = [category, count];
+      where = "WHERE category = $1";
+      limit = "$2";
+    }
     const { rows } = await pgPool.query(
       `
         SELECT id, question, type, choice_a, choice_b, choice_c, choice_d, category, difficulty
@@ -344,6 +362,19 @@ export async function selectRandomQuestions(count, category) {
       values
     );
     return rows;
+  }
+
+  if (specialQuestions.length) {
+    const placeholders = specialQuestions.map(() => "?").join(", ");
+    return sqliteDb
+      .prepare(`
+        SELECT id, question, type, choice_a, choice_b, choice_c, choice_d, category, difficulty
+        FROM questions
+        WHERE LOWER(TRIM(question)) IN (${placeholders})
+        ORDER BY RANDOM()
+        LIMIT ?
+      `)
+      .all(...specialQuestions.map(normalizeQuestionText), count);
   }
 
   if (category) {
@@ -575,7 +606,12 @@ function listQuestionsSqlite(filters, userId) {
     clauses.push("(q.question LIKE ? OR q.explanation LIKE ?)");
     params.push(`%${filters.search}%`, `%${filters.search}%`);
   }
-  if (filters.category) {
+  const specialQuestions = getSpecialCategoryQuestions(filters.category);
+  if (specialQuestions.length) {
+    const placeholders = specialQuestions.map(() => "?").join(", ");
+    clauses.push(`LOWER(TRIM(q.question)) IN (${placeholders})`);
+    params.push(...specialQuestions.map(normalizeQuestionText));
+  } else if (filters.category) {
     clauses.push("q.category = ?");
     params.push(filters.category);
   }
@@ -614,7 +650,12 @@ async function listQuestionsPostgres(filters, userId) {
     const search = add(`%${filters.search}%`);
     clauses.push(`(q.question ILIKE ${search} OR q.explanation ILIKE ${search})`);
   }
-  if (filters.category) clauses.push(`q.category = ${add(filters.category)}`);
+  const specialQuestions = getSpecialCategoryQuestions(filters.category);
+  if (specialQuestions.length) {
+    clauses.push(`LOWER(TRIM(q.question)) = ANY(${add(specialQuestions.map(normalizeQuestionText))})`);
+  } else if (filters.category) {
+    clauses.push(`q.category = ${add(filters.category)}`);
+  }
   if (filters.type) clauses.push(`q.type = ${add(filters.type)}`);
   if (filters.difficulty) clauses.push(`q.difficulty = ${add(filters.difficulty)}`);
   if (filters.marked === "true") clauses.push("rm.id IS NOT NULL");
