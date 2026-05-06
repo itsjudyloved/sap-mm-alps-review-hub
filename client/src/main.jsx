@@ -589,7 +589,7 @@ function Reviewer({ api }) {
       api.questions({ category, marked: markedOnly ? "true" : "" }),
       api.categories()
     ]);
-    setQuestions(questionData.questions);
+    setQuestions(questionData.questions.map(decorateQuestionChoices));
     setCategories(categoryData.categories);
     setIndex(0);
     setRevealed(false);
@@ -634,14 +634,14 @@ function Reviewer({ api }) {
           <h2>{current.question}</h2>
           {current.type === "multiple_choice" && (
             <ol className="choices">
-              {["a", "b", "c", "d"].map((letter) => (
-                <li key={letter}><strong>{letter.toUpperCase()}.</strong> {current[`choice_${letter}`]}</li>
+              {displayChoiceOptions(current).map((choice) => (
+                <li key={choice.label}><strong>{choice.label}.</strong> {choice.text}</li>
               ))}
             </ol>
           )}
           {revealed && (
             <div className="answer-panel">
-              <strong>Answer: {current.correct_answer}</strong>
+              <strong>Answer: {formatDisplayAnswer(current, current.correct_answer)}</strong>
               {current.explanation && <p>{current.explanation}</p>}
             </div>
           )}
@@ -700,7 +700,7 @@ function PracticeExam({ api }) {
       };
       const data = await api.startPractice(payload);
       setAttempt(data.attempt);
-      setQuestions(data.questions);
+      setQuestions(data.questions.map(decorateQuestionChoices));
       setIndex(0);
       setSelectedByQuestion({});
       setFeedbackByQuestion({});
@@ -796,7 +796,7 @@ function PracticeExam({ api }) {
             {feedback && (
               <div className={`answer-panel ${feedback.is_correct ? "correct" : "wrong"}`}>
                 <strong>
-                  {feedback.is_correct ? "Correct" : "Wrong"} - Answer: {feedback.correct_answer}
+                  {feedback.is_correct ? "Correct" : "Wrong"} - Answer: {formatDisplayAnswer(current, feedback.correct_answer)}
                 </strong>
                 {feedback.explanation && <p>{feedback.explanation}</p>}
               </div>
@@ -902,7 +902,9 @@ function MockExam({ api }) {
         return;
       }
 
-      const selectedQuestions = shuffleArray(data.questions).slice(0, Math.min(MOCK_QUESTION_COUNT, data.questions.length));
+      const selectedQuestions = shuffleArray(data.questions)
+        .slice(0, Math.min(MOCK_QUESTION_COUNT, data.questions.length))
+        .map(decorateQuestionChoices);
       setAvailableCount(data.questions.length);
       setQuestions(selectedQuestions);
       setIndex(0);
@@ -1112,8 +1114,8 @@ function MockResults({ result, restart }) {
               <tr key={answer.id}>
                 <td data-label="#">{answer.position}</td>
                 <td data-label="Question">{answer.question}</td>
-                <td data-label="Your Answer">{answer.selected_answer || "--"}</td>
-                <td data-label="Correct Answer">{answer.correct_answer}</td>
+                <td data-label="Your Answer">{formatDisplayAnswer(answer, answer.selected_answer)}</td>
+                <td data-label="Correct Answer">{formatDisplayAnswer(answer, answer.correct_answer)}</td>
                 <td data-label="Result">
                   {answer.is_correct ? (
                     <span className="result-tag correct"><CheckCircle2 size={16} /> Correct</span>
@@ -1137,17 +1139,16 @@ function AnswerInput({ question, selected, locked, onSelect }) {
   if (question.type === "multiple_choice") {
     return (
       <div className="answer-options">
-        {["a", "b", "c", "d"].map((letter) => {
-          const value = letter.toUpperCase();
+        {displayChoiceOptions(question).map((choice) => {
           return (
             <button
-              key={letter}
-              className={selected === value ? "selected" : ""}
+              key={`${choice.label}-${choice.original}`}
+              className={selected === choice.original ? "selected" : ""}
               disabled={locked}
-              onClick={() => onSelect(value)}
+              onClick={() => onSelect(choice.original)}
               type="button"
             >
-              <strong>{value}.</strong> {question[`choice_${letter}`]}
+              <strong>{choice.label}.</strong> {choice.text}
             </button>
           );
         })}
@@ -1251,6 +1252,42 @@ function Toolbar({ children }) {
 
 function labelType(type) {
   return type.replace("_", " ");
+}
+
+function baseChoiceOptions(question) {
+  return ["A", "B", "C", "D"].map((letter) => ({
+    label: letter,
+    original: letter,
+    text: question[`choice_${letter.toLowerCase()}`] || ""
+  }));
+}
+
+function decorateQuestionChoices(question) {
+  if (question.type !== "multiple_choice") return question;
+  const shuffled = shuffleArray(baseChoiceOptions(question));
+  return {
+    ...question,
+    display_choices: shuffled.map((choice, index) => ({
+      ...choice,
+      label: ["A", "B", "C", "D"][index]
+    }))
+  };
+}
+
+function displayChoiceOptions(question) {
+  if (Array.isArray(question.display_choices) && question.display_choices.length) {
+    return question.display_choices;
+  }
+  return baseChoiceOptions(question);
+}
+
+function formatDisplayAnswer(question, answer) {
+  if (!answer) return "--";
+  if (question.type !== "multiple_choice") return answer;
+
+  const normalizedAnswer = normalizeMockAnswer(answer, "multiple_choice");
+  const match = displayChoiceOptions(question).find((choice) => choice.original === normalizedAnswer);
+  return match ? `${match.label}. ${match.text}` : answer;
 }
 
 function formatSeconds(totalSeconds) {
